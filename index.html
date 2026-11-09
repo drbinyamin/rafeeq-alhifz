@@ -465,7 +465,7 @@ const sName = s => Q[s-1][0];
 
 /* ---------- storage ---------- */
 const KEY = 'rafeeq-hifz-v1';
-const DEF = { reciter:RECITERS[0][0], size:1, repeat:3, goal:5, reads:5, theme:'system', dir:'fwd', onboarded:false, strict:'normal', tafsir:'ar.muyassar' };
+const DEF = { reciter:RECITERS[0][0], size:1, repeat:3, goal:5, reads:5, theme:'system', dir:'fwd', onboarded:false, strict:'normal', tafsir:'ar.muyassar', listen:'once' };
 let S = { v:2, items:[], days:[], last:null, next:null, newLog:{}, settings:Object.assign({},DEF) };
 let storageOk = true;
 try {
@@ -727,7 +727,7 @@ function progressHTML(){
 
 /* ---------- reader ---------- */
 function openReader(s, a, b, opts){
-  stopAll(); opts=opts||{};
+  opts=opts||{}; if (opts.keepAudio) stopListening(); else stopAll();
   const n = nAyat(s);
   a = Math.min(Math.max(1, a||1), n); b = Math.min(Math.max(a, b||n), n);
   R = { s, a, b, flow: opts.flow||'free', step:opts.step||0, mode: opts.mode||'read', level: 2, tab: opts.tab||'ayat', st:{}, ptr:0, tries:{}, itemId: opts.itemId||null, fromPlan:!!opts.fromPlan, done:false, reads:0 };
@@ -829,7 +829,7 @@ function counts(){
   ex.forEach(e=>{ const v=R.st[e.a+':'+e.i]; if(v==='ok')ok++; else if(v==='bad')bad++; else if(v==='hint')hint++; else if(v==='given')given++; });
   return {tot:ex.length-given, ok, bad, hint, finished: R.ptr>=ex.length || ok+bad+hint+given>=ex.length || R.done};
 }
-function dockState(){ if (!R || R.tab!=='ayat') return 'none'; const m=curMode(); if (m==='read') return 'read'+R.step+(playing?'p':'')+R.reads; return (counts().finished?'fin':'run')+(listening?'L':''); }
+function dockState(){ if (!R || R.tab!=='ayat') return 'none'; const m=curMode(); if (m==='read') return 'read'+R.step+(playing?'p'+qi:'')+R.reads+S.settings.listen; return (counts().finished?'fin':'run')+(listening?'L':''); }
 function dockHTML(){
   if (R.tab!=='ayat') return '';
   const mode=curMode(), rep=S.settings.repeat;
@@ -839,7 +839,9 @@ function dockHTML(){
   if (mode==='read'){
     if (R.flow==='learn' && R.step===0) return dock(`<div class="dock-row">${playBtn}<div class="grow"><div class="lead">${playing?'جارٍ الاستماع…':'استمع للمقطع بإنصات'}</div><div class="note">${reciter} · كل آية ${ar(rep)}×</div></div>${repChip}</div><button class="btn primary" data-act="step" data-to="1">استمعت · التالي ${I.fwd}</button>`);
     if (R.flow==='learn' && R.step===1){ const tgt=S.settings.reads, r=R.reads; return dock(`<div class="dock-row">${playBtn}<button class="counter" data-act="read1">${r>=tgt?'أحسنت، انتقل للتسميع':'ردّدته مرة · '+ar(r)+' من '+ar(tgt)}</button></div><div class="btns"><button class="btn" data-act="step" data-to="0">${I.back} استمع</button><button class="btn ${r>=tgt?'primary':''} wide" data-act="step" data-to="2">${r>=tgt?'التالي: سمّع بتلميح':'انتقل إلى التسميع'} ${I.fwd}</button></div>`); }
-    return dock(`<div class="dock-row">${playBtn}<div class="grow"><div class="lead">${playing?'جارٍ التشغيل…':'استمع للمقطع'}</div><div class="note">${reciter}</div></div>${repChip}</div><button class="btn primary" data-act="mode" data-m="test">${I.mic} أنا جاهز للتسميع</button>`);
+    const lm = LISTEN[S.settings.listen] || LISTEN.once;
+    return dock(`<div class="dock-row">${playBtn}<div class="grow"><div class="lead">${playing?(nowAyah()?'الآية '+ar(nowAyah())+' · '+lm[1]:'جارٍ التشغيل…'):'استمع للمقطع'}</div><div class="note">${reciter}</div></div>${repChip}</div>
+      <div class="btns"><button class="btn ${S.settings.listen!=='once'?'primary':''}" data-act="listenMode" aria-label="طريقة الاستماع: ${lm[1]}">${lm[0]} ${lm[1]}</button><button class="btn wide" data-act="mode" data-m="test">${I.mic} أنا جاهز للتسميع</button></div>`);
   }
   const c = counts(); const errs=c.bad+c.hint;
   const head = `<div class="dock-row"><button class="round ${listening?'on':''}" data-act="mic" aria-label="${listening?'إيقاف الاستماع':'ابدأ التسميع بالصوت'}">${listening?I.stop:I.mic}</button>
@@ -1044,8 +1046,13 @@ function backtrack(){
   const el=document.getElementById('ay'+a); if (el) el.scrollIntoView({block:'center',behavior:reduced()?'auto':'smooth'});
 }
 
-/* ---------- audio ---------- */
-const audio = new Audio(); audio.preload='auto';
+/* ---------- audio ----------
+   Two players alternate: while one plays, the next ayah loads in the other, so ayat follow
+   each other without a silent gap. Listening modes: once (stop at the end of the passage),
+   loop (repeat the passage), continuous (carry on into the next passage and the next surah). */
+const LISTEN = { once:[I.play,'مرة واحدة'], loop:[I.loop,'تكرار المقطع'], cont:[I.ear,'استماع متواصل'] };
+const players = [new Audio(), new Audio()]; players.forEach(p=>{ p.preload='auto'; });
+let pi=0; const audio = { pause(){ players.forEach(p=>{ try{ p.pause(); }catch(e){} }); } };
 let playing=false, queue=[], qi=0, rep=0, loopOne=false;
 let GOFF=null;
 function globalN(s,a){ if(!GOFF){ GOFF=[0]; for(let i=0;i<114;i++) GOFF.push(GOFF[i]+Q[i][3].length); } return GOFF[s-1]+a; }
@@ -1058,20 +1065,71 @@ function audioSources(s,a,recId){
 }
 let srcPref=0, srcTry=0;
 function srcOrder(list){ const k=Math.min(srcPref,list.length-1); return list.slice(k).concat(list.slice(0,k)); }
+const nowAyah = () => playing && queue[qi] ? queue[qi] : null;
 function highlight(a){ app.querySelectorAll('.ayah.playing').forEach(e=>e.classList.remove('playing')); if (a){ const el=document.getElementById('ay'+a); if(el){ el.classList.add('playing'); const r=el.getBoundingClientRect(); if (r.top<110 || r.bottom>innerHeight-230) el.scrollIntoView({block:'center',behavior:reduced()?'auto':'smooth'}); } } }
-function playFrom(a, only, loop){ stopListening(); queue=[]; for(let x=a;x<=(only?a:R.b);x++) queue.push(x); qi=0; rep=0; loopOne=!!loop; playing=true; srcTry=0; holdWake(); playCur(); refreshDock(); }
+function playFrom(a, only, loop){ stopListening(); queue=[]; for(let x=a;x<=(only?a:R.b);x++) queue.push(x); qi=0; rep=0; loopOne=!!loop; playing=true; srcTry=0; if (S.settings.listen!=='cont') holdWake(); playCur(); refreshDock(); }
+function keyFor(s,a){ return s+':'+a+':'+S.settings.reciter; }
 function playCur(){
-  if (!playing || qi>=queue.length){ stopAudio(); return; }
-  const a=queue[qi], list=srcOrder(audioSources(R.s,a));
-  audio.src = list[srcTry] || list[0]; highlight(a);
+  if (!playing) return;
+  if (qi>=queue.length){ if (!endOfQueue()) return; }
+  const a=queue[qi], el=players[pi], key=keyFor(R.s,a), list=srcOrder(audioSources(R.s,a));
+  if (el.dataset.key!==key || srcTry){ el.src = list[srcTry] || list[0]; el.dataset.key = srcTry ? '' : key; }
+  else { try { el.currentTime = 0; } catch(e){} }
+  highlight(a); updateLiveRead();
   try { if ('mediaSession' in navigator){ navigator.mediaSession.metadata = new MediaMetadata({title:'سورة '+sName(R.s)+' · الآية '+a, artist:(RECITERS.find(r=>r[0]===S.settings.reciter)||RECITERS[0])[1], album:'رفيق الحفظ'}); } } catch(e){}
-  const p = audio.play();
+  const p = el.play();
   if (p && p.catch) p.catch(err=>{
     if (err && err.name==='AbortError') return;
     if (err && err.name==='NotAllowedError'){ stopAudio(); toast('اضغط زر التشغيل مرة أخرى لبدء الصوت.'); return; }
     tryNextSource();
   });
-  const nx = queue[qi+1]; if (nx){ try { const pre=new Audio(); pre.preload='auto'; pre.src=srcOrder(audioSources(R.s,nx))[0]; } catch(e){} }
+  preloadNext();
+}
+/* what plays after the current ayah, without changing state */
+function peekNext(){
+  if (loopOne || rep+1 < S.settings.repeat) return null;
+  if (qi+1 < queue.length) return {s:R.s, a:queue[qi+1]};
+  const lm=S.settings.listen;
+  if (lm==='loop') return {s:R.s, a:queue[0]};
+  if (lm==='cont'){ const nx=nextPassage(); return nx ? {s:nx.s, a:nx.a} : null; }
+  return null;
+}
+function preloadNext(){
+  const nx=peekNext(); if (!nx) return;
+  const other=players[pi^1], key=keyFor(nx.s,nx.a);
+  if (other.dataset.key===key) return;
+  try { other.src = srcOrder(audioSources(nx.s,nx.a))[0]; other.dataset.key=key; other.load(); } catch(e){}
+}
+function nextPassage(){
+  const n=nAyat(R.s), size=R.b-R.a+1, whole = R.a===1 && R.b===n;
+  if (!whole && R.b<n) return {s:R.s, a:R.b+1, b:Math.min(n, R.b+size)};
+  if (R.s<114) return {s:R.s+1, a:1, b:nAyat(R.s+1)};
+  return null;
+}
+/* called when the queue runs out; returns true if playback continues */
+function endOfQueue(){
+  const lm=S.settings.listen;
+  if (lm==='loop'){ qi=0; rep=0; return true; }
+  if (lm==='cont'){
+    const nx=nextPassage(); if (!nx){ stopAudio(); toast('تمّت تلاوة المصحف كاملاً، تقبّل الله.'); return false; }
+    const tab=R.tab;
+    openReader(nx.s, nx.a, nx.b, {flow:'free', mode:'read', tab, keepAudio:true});
+    queue=[]; for (let x=R.a;x<=R.b;x++) queue.push(x); qi=0; rep=0;
+    return true;
+  }
+  stopAudio(); return false;
+}
+function onEnded(e){
+  if (!playing || e.target!==players[pi]) return;
+  srcTry=0; rep++;
+  if (!loopOne && rep>=S.settings.repeat){
+    rep=0; qi++;
+    const nextKey = qi<queue.length ? keyFor(R.s,queue[qi]) : null;
+    if (qi>=queue.length){ if (!endOfQueue()) return; }
+    const k2 = keyFor(R.s,queue[qi]);
+    if (players[pi^1].dataset.key===k2) pi^=1;
+  }
+  playCur();
 }
 function tryNextSource(){
   if (!playing) return;
@@ -1079,12 +1137,22 @@ function tryNextSource(){
   if (srcTry+1 < n){ srcTry++; playCur(); return; }
   stopAudio(); toast('تعذّر تشغيل الصوت من كل المصادر. تحقّق من الإنترنت، أو افتح «فحص الصوت» من الإعدادات.');
 }
-audio.addEventListener('playing', ()=>{ if (srcTry && R){ const n=audioSources(R.s,queue[qi]).length; srcPref=(Math.min(srcPref,n-1)+srcTry)%n; srcTry=0; } });
-audio.addEventListener('ended', ()=>{ rep++; if (!loopOne && rep>=S.settings.repeat){ rep=0; qi++; } srcTry=0; playCur(); });
-audio.addEventListener('error', ()=>{ if (playing && audio.src) tryNextSource(); });
-try { if ('mediaSession' in navigator){ navigator.mediaSession.setActionHandler('pause', ()=>stopAudio()); navigator.mediaSession.setActionHandler('stop', ()=>stopAudio()); } } catch(e){}
-function stopAudio(){ playing=false; loopOne=false; try{ audio.pause(); }catch(e){} highlight(null); releaseWake(); if (view==='reader') refreshDock(); }
-function stopAll(){ stopListening(); if (playing){ playing=false; try{audio.pause();}catch(e){} releaseWake(); } }
+players.forEach(p=>{
+  p.addEventListener('ended', onEnded);
+  p.addEventListener('playing', e=>{ if (e.target!==players[pi] || !R) return; if (srcTry){ const n=audioSources(R.s,queue[qi]).length; srcPref=(Math.min(srcPref,n-1)+srcTry)%n; srcTry=0; e.target.dataset.key=keyFor(R.s,queue[qi]); } });
+  p.addEventListener('error', e=>{ if (playing && e.target===players[pi] && e.target.src) tryNextSource(); else if (e.target!==players[pi]) e.target.dataset.key=''; });
+});
+function skipAyah(d){ if (!playing) return; rep=0; srcTry=0; qi=Math.max(0, qi+d); playCur(); }
+try { if ('mediaSession' in navigator){
+  navigator.mediaSession.setActionHandler('pause', ()=>stopAudio());
+  navigator.mediaSession.setActionHandler('stop', ()=>stopAudio());
+  navigator.mediaSession.setActionHandler('play', ()=>{ if (R && view==='reader' && !playing) playFrom(queue[qi]||R.a); });
+  navigator.mediaSession.setActionHandler('nexttrack', ()=>skipAyah(1));
+  navigator.mediaSession.setActionHandler('previoustrack', ()=>skipAyah(-1));
+} } catch(e){}
+function updateLiveRead(){ if (R && view==='reader' && curMode()==='read') refreshDock(); }
+function stopAudio(){ playing=false; loopOne=false; audio.pause(); highlight(null); releaseWake(); if (view==='reader') refreshDock(); }
+function stopAll(){ stopListening(); if (playing){ playing=false; audio.pause(); releaseWake(); } }
 let wake=null;
 async function holdWake(){ try { if ('wakeLock' in navigator && !wake){ wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release',()=>{ wake=null; }); } } catch(e){ wake=null; } }
 function releaseWake(){ if (wake && !playing && !listening){ try{ wake.release(); }catch(e){} wake=null; } }
@@ -1100,6 +1168,7 @@ function settingsSheet(){
     <div class="field"><label for="rec">القارئ</label><select id="rec">${RECITERS.map(r=>`<option value="${r[0]}" ${r[0]===st.reciter?'selected':''}>${r[1]}</option>`).join('')}</select></div>
     <div class="field"><label for="fs">حجم خط المصحف</label><input id="fs" type="range" min="0.8" max="1.7" step="0.1" value="${st.size}"><div class="preview">ٱلۡحَمۡدُ لِلَّهِ رَبِّ ٱلۡعَٰلَمِينَ</div></div>
     <div class="field"><span class="lbl">الحفظ الجديد يومياً</span><div class="chips" style="padding:0">${[3,5,7,10,15,20].map(n=>`<button class="chip" data-act="set" data-k="goal" data-v="${n}" aria-pressed="${st.goal===n}">${ar(n)} آيات</button>`).join('')}</div></div>
+    <div class="field"><span class="lbl">طريقة الاستماع</span>${seg('listen',[['once','مرة واحدة'],['loop','تكرار المقطع'],['cont','متواصل']])}<span class="note">«متواصل» ينتقل تلقائياً إلى الآيات التالية ثم السورة التالية دون توقف، ويمكن إطفاء الشاشة أثناءه.</span></div>
     <div class="field"><span class="lbl">تكرار كل آية عند الاستماع</span><div class="chips" style="padding:0">${[1,3,5,7,10].map(n=>`<button class="chip" data-act="set" data-k="repeat" data-v="${n}" aria-pressed="${st.repeat===n}">${ar(n)}×</button>`).join('')}</div></div>
     <div class="field"><span class="lbl">دقّة التصحيح الصوتي</span>${seg('strict',[['easy','متساهل'],['normal','متوسط'],['strict','دقيق']])}<span class="note">اختر «متساهل» إذا كان التطبيق يخطّئ كلمات قرأتها صحيحة.</span></div>
     <div class="field"><span class="lbl">التفسير</span>${seg('tafsir',TAFSIRS)}</div>
@@ -1278,6 +1347,7 @@ document.addEventListener('click', e=>{
     case 'aLearn': { const a=+t.dataset.a; S.next={s:R.s,a}; S.settings.onboarded=true; save(); const p=nextPortion(); if (p) openReader(p.s,p.a,p.b,{flow:'learn',fromPlan:true}); else toast('هذه الآيات محفوظة لديك.'); return; }
     case 'aTest': { const a=+t.dataset.a; return openReader(R.s,a,a,{flow:'free',mode:'test'}); }
     case 'play': if (playing) stopAudio(); else playFrom(R.a); return;
+    case 'listenMode': { const order=['once','loop','cont']; S.settings.listen = order[(order.indexOf(S.settings.listen)+1)%3]; save(); toast((LISTEN[S.settings.listen]||LISTEN.once)[1] + (S.settings.listen==='cont'?': يواصل إلى ما بعد المقطع والسورة حتى توقفه':S.settings.listen==='loop'?': يعيد المقطع حتى توقفه':': يتوقف في نهاية المقطع')); if (playing){ releaseWake(); if (S.settings.listen!=='cont') holdWake(); preloadNext(); } refreshDock(); return; }
     case 'repeat': { const seq=[1,3,5,7,10]; S.settings.repeat = seq[(seq.indexOf(S.settings.repeat)+1)%seq.length]||1; save(); refreshDock(); return; }
     case 'mic': if (listening){ stopListening(); commitBase(); refreshDock(); } else startListening(); return;
     case 'reset': stopListening(); resetTest(); renderReader(); return;
