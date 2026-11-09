@@ -1,5 +1,5 @@
 // رفيق الحفظ — offline support
-const VERSION = 'rafeeq-v2.2.0';
+const VERSION = 'rafeeq-v3.0.0';
 const CORE = ['./', './index.html', './quran.json', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png'];
 
@@ -7,7 +7,7 @@ self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== VERSION && !k.endsWith('-tafsir')).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
   const req = e.request;
@@ -15,7 +15,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   // App page: network first so updates arrive, cache fallback offline
   if (req.mode === 'navigate' && url.origin === location.origin) {
-    e.respondWith(fetch(req).then(r => { const copy = r.clone(); caches.open(VERSION).then(c => c.put('./index.html', copy)); return r; })
+    e.respondWith(fetch(req, {cache:'no-cache'}).then(r => { const copy = r.clone(); caches.open(VERSION).then(c => c.put('./index.html', copy)); return r; })
       .catch(() => caches.match('./index.html')));
     return;
   }
@@ -25,6 +25,11 @@ self.addEventListener('fetch', e => {
       const net = fetch(req).then(r => { if (r.ok || r.type === 'opaque') { const copy = r.clone(); caches.open(VERSION).then(c => c.put(req, copy)); } return r; }).catch(() => hit);
       return hit || net;
     }));
+  }
+  // Tafsir text: cache first so it works offline after the first read
+  if (url.hostname === 'api.alquran.cloud') {
+    e.respondWith(caches.open(VERSION + '-tafsir').then(c => c.match(req).then(hit => hit || fetch(req).then(r => { if (r.ok) c.put(req, r.clone()); return r; }))));
+    return;
   }
   // Recitation audio goes straight to the network (streamed with range requests)
 });
