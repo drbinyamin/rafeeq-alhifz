@@ -141,8 +141,9 @@ h2 button{border:0;background:none;color:var(--accent);font-size:.85rem;padding:
 .rhead .title{font-family:var(--f-quran);font-size:1.45rem;line-height:1.2}
 .rhead .sub{font-size:.74rem;color:var(--muted)}
 .stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding-bottom:4px}
-.stepper div{display:flex;flex-direction:column;gap:5px;font-size:.72rem;color:var(--muted);text-align:center}
-.stepper div::before{content:"";height:4px;border-radius:4px;background:var(--sunk)}
+.stepper button{display:flex;flex-direction:column;gap:6px;font-size:.74rem;color:var(--muted);text-align:center;border:0;background:none;padding:8px 2px 6px;border-radius:10px;min-height:44px}
+.stepper button:active{background:var(--sunk)}
+.stepper button::before{content:"";height:5px;border-radius:5px;background:var(--sunk)}
 .stepper .on{color:var(--fg);font-weight:500}
 .stepper .on::before,.stepper .past::before{background:var(--accent)}
 .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-block:6px 10px;border-bottom:1px solid var(--line)}
@@ -226,7 +227,9 @@ h2 button{border:0;background:none;color:var(--accent);font-size:.85rem;padding:
 let Q = null;
 const TOTAL = 6236;
 const JUZ = [[1,1],[2,142],[2,253],[3,93],[4,24],[4,148],[5,82],[6,111],[7,88],[8,41],[9,93],[11,6],[12,53],[15,1],[17,1],[18,75],[21,1],[23,1],[25,21],[27,56],[29,46],[33,31],[36,28],[39,32],[41,47],[46,1],[51,31],[58,1],[67,1],[78,1]];
-const RECITERS = [["Alafasy_128kbps","مشاري العفاسي"],["Husary_128kbps","محمود خليل الحصري"],["Minshawy_Murattal_128kbps","محمد صديق المنشاوي"],["Abdul_Basit_Murattal_192kbps","عبد الباسط عبد الصمد"],["Ghamadi_40kbps","سعد الغامدي"],["Abdurrahmaan_As-Sudais_192kbps","عبد الرحمن السديس"]];
+// [everyayah folder, name, quran.com path, islamic.network edition/bitrate]
+const RECITERS = [["Alafasy_128kbps","مشاري العفاسي","Alafasy","128/ar.alafasy"],["Husary_128kbps","محمود خليل الحصري","Husary","128/ar.husary"],["Minshawy_Murattal_128kbps","محمد صديق المنشاوي","Minshawi/Murattal","128/ar.minshawi"],["Abdul_Basit_Murattal_192kbps","عبد الباسط عبد الصمد","AbdulBaset/Murattal","192/ar.abdulbasitmurattal"],["Ghamadi_40kbps","سعد الغامدي","",""],["Abdurrahmaan_As-Sudais_192kbps","عبد الرحمن السديس","Sudais","192/ar.abdurrahmaansudais"]];
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
 const STEPS = ['استمع','ردّد','سمّع بتلميح','سمّع غيباً'];
 const app = document.getElementById('app'), overlay = document.getElementById('overlay');
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -546,7 +549,7 @@ function renderReader(){
   const [name,tr,type] = Q[R.s-1]; const n=nAyat(R.s), T=tokens(R.s), mode=curMode(), level=curLevel();
   const flowTitle = R.flow==='learn' ? 'حفظ جديد' : R.flow==='review' ? 'مراجعة' : '';
   let h = `<header class="top rhead"><button class="icon-btn" data-act="exit" aria-label="رجوع">${I.back}</button><div class="grow"><div class="title">سورة ${name}</div><div class="sub">${flowTitle?flowTitle+' · ':''}${rangeLabel(R.s,R.a,R.b)} · الجزء ${ar(juzOf(R.s,R.a))}</div></div><button class="icon-btn" data-act="settings" aria-label="الإعدادات">${I.gear}</button></header>`;
-  if (R.flow==='learn') h += `<div class="stepper" aria-label="خطوات الحفظ">${STEPS.map((l,i)=>`<div class="${i===R.step?'on':i<R.step?'past':''}">${l}</div>`).join('')}</div>`;
+  if (R.flow==='learn') h += `<nav class="stepper" aria-label="خطوات الحفظ">${STEPS.map((l,i)=>`<button data-act="step" data-to="${i}" class="${i===R.step?'on':i<R.step?'past':''}" ${i===R.step?'aria-current="step"':''}>${ar(i+1)} · ${l}</button>`).join('')}</nav>`;
   h += `<div class="toolbar">`;
   if (R.flow==='free') h += `<div class="seg" role="group" aria-label="الوضع"><button data-act="mode" data-m="read" aria-pressed="${mode==='read'}">قراءة</button><button data-act="mode" data-m="test" aria-pressed="${mode==='test'}">تسميع</button></div>`;
   h += `<button class="rangebtn" data-act="rangeSheet" ${R.flow!=='free'?'disabled':''}>${rangeLabel(R.s,R.a,R.b)}${R.flow==='free'?I.edit:''}</button><span class="grow"></span>`;
@@ -710,9 +713,10 @@ function startListening(){
   if (!SR){ toast('التسميع الصوتي غير مدعوم في هذا المتصفح. جرّب Chrome أو Safari، أو المس الكلمات لكشفها.'); return; }
   stopAudio();
   try {
-    rec = new SR(); rec.lang='ar-SA'; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+    rec = new SR(); rec.lang='ar-SA'; rec.continuous=!IOS; rec.interimResults=true; rec.maxAlternatives=1; R.gotResult=false; R.micAt=Date.now();
     commitBase(); R.fb=null; R.heard=''; R.lastProgress=Date.now();
     rec.onresult = e => {
+      R.gotResult=true;
       const parts = resultWords(e.results); const words=[]; let tentFrom=Infinity, txt='';
       parts.forEach(p=>{ if (!p.fin && tentFrom===Infinity) tentFrom=words.length; words.push(...p.ws); txt+=' '+p.txt; });
       onWords(words, tentFrom, txt);
@@ -720,15 +724,17 @@ function startListening(){
     rec.onerror = e => {
       if (e.error==='not-allowed' || e.error==='service-not-allowed'){ listening=false; clearInterval(stallT); releaseWake(); toast('لم يُسمح بالميكروفون. فعّله من إعدادات المتصفح لهذا الموقع.'); refreshDock(); }
       else if (e.error==='network'){ listening=false; clearInterval(stallT); releaseWake(); toast('التعرّف على الصوت يحتاج اتصالاً بالإنترنت.'); refreshDock(); }
+      else if (e.error==='audio-capture'){ listening=false; clearInterval(stallT); releaseWake(); toast('لم يُعثر على ميكروفون يعمل. أغلق التطبيقات التي تستخدمه ثم حاول.'); refreshDock(); }
       else if (e.error==='language-not-supported'){ listening=false; clearInterval(stallT); toast('هذا الجهاز لا يدعم التعرّف على العربية.'); refreshDock(); }
     };
-    rec.onend = () => { if (!R) return; commitBase(); if (listening){ try{ rec.start(); }catch(err){ listening=false; refreshDock(); } } };
+    rec.onend = () => { if (!R) return; commitBase(); if (listening){ try{ rec.start(); }catch(err){ listening=false; releaseWake(); toast('توقّف الاستماع. اضغط الميكروفون للمتابعة.'); refreshDock(); } } };
     rec.start(); listening=true; holdWake(); refreshDock(); markCur();
     clearInterval(stallT); stallT=setInterval(stallCheck, 1000);
   } catch(err){ listening=false; toast('تعذّر تشغيل التعرّف على الصوت.'); refreshDock(); }
 }
 function stallCheck(){
   if (!listening || !R) { clearInterval(stallT); return; }
+  if (!R.gotResult && Date.now()-R.micAt > 9000 && !R.noVoiceWarned){ R.noVoiceWarned=true; R.fb=null; const hd=document.getElementById('heard'); if (hd) hd.innerHTML='<span class="fb">لا يصلني صوت بعد. تحقّق من الميكروفون أو افتح «فحص الصوت» من الإعدادات.</span>'; }
   if (Date.now()-(R.lastProgress||0) < 7000) return;
   const e=expected()[R.ptr]; if (!e) return;
   const el=app.querySelector(`[data-k="${e.a}:${e.i}"]`);
@@ -741,19 +747,41 @@ function userHint(keys){ keys.forEach(k=>{ if (!R.st[k]) setWord(k,'hint'); }); 
 /* ---------- audio ---------- */
 const audio = new Audio(); audio.preload='auto';
 let playing=false, queue=[], qi=0, rep=0, loopOne=false;
-const audioUrl = (s,a) => `https://everyayah.com/data/${S.settings.reciter}/${pad3(s)}${pad3(a)}.mp3`;
+let GOFF=null;
+function globalN(s,a){ if(!GOFF){ GOFF=[0]; for(let i=0;i<114;i++) GOFF.push(GOFF[i]+Q[i][3].length); } return GOFF[s-1]+a; }
+function audioSources(s,a,recId){
+  const r = RECITERS.find(x=>x[0]===(recId||S.settings.reciter)) || RECITERS[0], f=pad3(s)+pad3(a), out=[];
+  out.push('https://everyayah.com/data/'+r[0]+'/'+f+'.mp3');
+  if (r[2]) out.push('https://verses.quran.com/'+r[2]+'/mp3/'+f+'.mp3');
+  if (r[3]) out.push('https://cdn.islamic.network/quran/audio/'+r[3]+'/'+globalN(s,a)+'.mp3');
+  return out;
+}
+let srcPref=0, srcTry=0;
+function srcOrder(list){ const k=Math.min(srcPref,list.length-1); return list.slice(k).concat(list.slice(0,k)); }
 function highlight(a){ app.querySelectorAll('.ayah.playing').forEach(e=>e.classList.remove('playing')); if (a){ const el=document.getElementById('ay'+a); if(el){ el.classList.add('playing'); const r=el.getBoundingClientRect(); if (r.top<110 || r.bottom>innerHeight-200) el.scrollIntoView({block:'center',behavior:reduced()?'auto':'smooth'}); } } }
-function playFrom(a, only, loop){ stopListening(); queue=[]; for(let x=a;x<=(only?a:R.b);x++) queue.push(x); qi=0; rep=0; loopOne=!!loop; playing=true; holdWake(); playCur(); refreshDock(); }
+function playFrom(a, only, loop){ stopListening(); queue=[]; for(let x=a;x<=(only?a:R.b);x++) queue.push(x); qi=0; rep=0; loopOne=!!loop; playing=true; srcTry=0; holdWake(); playCur(); refreshDock(); }
 function playCur(){
   if (!playing || qi>=queue.length){ stopAudio(); return; }
-  const a=queue[qi]; audio.src = audioUrl(R.s, a); highlight(a);
+  const a=queue[qi], list=srcOrder(audioSources(R.s,a));
+  audio.src = list[srcTry] || list[0]; highlight(a);
   try { if ('mediaSession' in navigator){ navigator.mediaSession.metadata = new MediaMetadata({title:'سورة '+sName(R.s)+' · الآية '+a, artist:(RECITERS.find(r=>r[0]===S.settings.reciter)||RECITERS[0])[1], album:'رفيق الحفظ'}); } } catch(e){}
-  const p = audio.play(); if (p && p.catch) p.catch(()=>failAudio());
-  const nx = queue[qi+1]; if (nx){ try { const pre=new Audio(); pre.preload='auto'; pre.src=audioUrl(R.s,nx); } catch(e){} }
+  const p = audio.play();
+  if (p && p.catch) p.catch(err=>{
+    if (err && err.name==='AbortError') return;
+    if (err && err.name==='NotAllowedError'){ stopAudio(); toast('اضغط زر التشغيل مرة أخرى لبدء الصوت.'); return; }
+    tryNextSource();
+  });
+  const nx = queue[qi+1]; if (nx){ try { const pre=new Audio(); pre.preload='auto'; pre.src=srcOrder(audioSources(R.s,nx))[0]; } catch(e){} }
 }
-function failAudio(){ if(!playing) return; stopAudio(); toast('تعذّر تشغيل الصوت. تحقّق من الاتصال، أو افتح التطبيق من رابطه مباشرة.'); }
-audio.addEventListener('ended', ()=>{ rep++; if (!loopOne && rep>=S.settings.repeat){ rep=0; qi++; } playCur(); });
-audio.addEventListener('error', failAudio);
+function tryNextSource(){
+  if (!playing) return;
+  const n = audioSources(R.s, queue[qi]).length;
+  if (srcTry+1 < n){ srcTry++; playCur(); return; }
+  stopAudio(); toast('تعذّر تشغيل الصوت من كل المصادر. تحقّق من الإنترنت، أو افتح «فحص الصوت» من الإعدادات.');
+}
+audio.addEventListener('playing', ()=>{ if (srcTry){ const n=audioSources(R.s,queue[qi]).length; srcPref=(Math.min(srcPref,n-1)+srcTry)%n; srcTry=0; } });
+audio.addEventListener('ended', ()=>{ rep++; if (!loopOne && rep>=S.settings.repeat){ rep=0; qi++; } srcTry=0; playCur(); });
+audio.addEventListener('error', ()=>{ if (playing && audio.src) tryNextSource(); });
 try { if ('mediaSession' in navigator){ navigator.mediaSession.setActionHandler('pause', ()=>stopAudio()); navigator.mediaSession.setActionHandler('stop', ()=>stopAudio()); } } catch(e){}
 function stopAudio(){ playing=false; loopOne=false; try{ audio.pause(); }catch(e){} highlight(null); releaseWake(); if (view==='reader') refreshDock(); }
 function stopAll(){ stopListening(); if (playing){ playing=false; try{audio.pause();}catch(e){} releaseWake(); } }
@@ -763,7 +791,7 @@ function releaseWake(){ if (wake && !playing && !listening){ try{ wake.release()
 
 /* ---------- sheets ---------- */
 function sheet(inner, label){ overlay.innerHTML = `<div class="sheet-bg" data-act="close"><div class="sheet" role="dialog" aria-modal="true" aria-label="${label}">${inner}</div></div>`; const f=overlay.querySelector('.sheet button,.sheet select'); if (f) try{ f.focus({preventScroll:true}); }catch(e){} }
-function closeSheet(){ overlay.innerHTML=''; confirmClear=false; }
+function closeSheet(){ overlay.innerHTML=''; confirmClear=false; try{ if (diagAudio) diagAudio.pause(); if (diagRec) diagRec.abort(); }catch(e){} }
 let confirmClear=false;
 function settingsSheet(){
   const st=S.settings;
@@ -777,6 +805,7 @@ function settingsSheet(){
     <div class="field"><span class="lbl">دقّة التصحيح الصوتي</span>${seg('strict',[['easy','متساهل'],['normal','متوسط'],['strict','دقيق']])}<span class="note">«متساهل» أنسب إذا كان التعرّف يخطئ في كلمات صحيحة، و«دقيق» يلتقط أخطاء النطق الواضحة أكثر.</span></div>
     <div class="field"><span class="lbl">نقطة الحفظ الحالية</span><button class="btn" data-act="startSheet" style="align-self:flex-start">${S.next?'سورة '+sName(S.next.s)+' · الآية '+ar(S.next.a)+' · تغيير':'حدّد نقطة البداية'}</button></div>
     <div class="field"><span class="lbl">البيانات</span><div class="btns"><button class="btn" data-act="export">تصدير</button><button class="btn" data-act="import">استيراد</button><button class="btn danger" data-act="clear">${confirmClear?'اضغط مجدداً لتأكيد الحذف':'حذف كل التقدّم'}</button></div><span class="note">يُحفظ تقدّمك على هذا الجهاز فقط، ولا يُرسل إلى أي جهة.</span></div>
+    <div class="field"><span class="lbl">إذا لم يعمل الصوت أو التسميع</span><button class="btn" data-act="diag" style="align-self:flex-start">فحص الصوت والميكروفون</button></div>
     <div class="credit">هذا التطبيق وقفٌ مجاني لوجه الله، بلا إعلانات ولا اشتراكات.<br>نص المصحف بالرسم العثماني من <a href="https://quranenc.com" target="_blank" rel="noopener">موسوعة القرآن الكريم</a> عبر مشروع quran-json (رخصة CC BY-SA 4.0). التلاوات من <a href="https://everyayah.com" target="_blank" rel="noopener">EveryAyah</a>.<br>التصحيح الصوتي تقريبي يساعد على المراجعة، ولا يغني عن التلقّي من معلّم متقن.</div>
     <div class="btns" style="margin-top:16px"><button class="btn primary wide" data-act="close">تم</button></div>`, 'الإعدادات');
   document.getElementById('rec').addEventListener('change', e=>{ S.settings.reciter=e.target.value; save(); if(view==='reader') refreshDock(); });
@@ -809,6 +838,50 @@ function rangeSheet(){
     <div class="btns"><button class="btn" data-act="rangeAll">السورة كاملة</button><button class="btn primary wide" data-act="rangeApply">تطبيق</button></div>`, 'اختر المقطع');
 }
 
+/* ---------- diagnostics ---------- */
+const STANDALONE = (()=>{ try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone===true; } catch(e){ return false; } })();
+let diagAudio=null, diagRec=null;
+function diagRow(id, label){ return `<div class="row" style="min-height:0;padding:10px 4px"><span class="grow">${label}<br><span class="s" id="${id}">…</span></span></div>`; }
+function setD(id, ok, msg){ const el=document.getElementById(id); if (el) el.innerHTML = `<span style="color:var(${ok===true?'--ok':ok===false?'--bad':'--muted'})">${ok===true?'✓ ':ok===false?'✗ ':''}${msg}</span>`; }
+function diagSheet(){
+  stopAll();
+  const srcs = audioSources(1,1);
+  sheet(`<h3>فحص الصوت والميكروفون</h3><p class="note">صوّر هذه الشاشة وأرسلها إذا استمرت المشكلة.</p>
+    <div style="margin-top:8px">${diagRow('dEnv','المتصفح')}${diagRow('dSR','التعرّف على الكلام')}${diagRow('dMic','إذن الميكروفون')}</div>
+    <div class="lbl note" style="margin:12px 0 4px">مصادر التلاوة (الفاتحة، الآية ١)</div>
+    <div>${srcs.map((u,i)=>`<div class="row" style="min-height:0;padding:8px 4px"><span class="grow">${['EveryAyah','Quran.com','Islamic Network'][i]}<br><span class="s" id="dA${i}">…</span></span><button class="btn" data-act="diagPlay" data-i="${i}">تشغيل</button></div>`).join('')}</div>
+    <div class="lbl note" style="margin:12px 0 6px">اختبار التسميع</div>
+    <button class="btn primary" data-act="diagSpeak">ابدأ ثم قل: بسم الله الرحمن الرحيم</button>
+    <div class="card" style="margin-top:8px;padding:10px;min-height:48px" id="dSay"><span class="note">ستظهر هنا الكلمات التي يسمعها الجهاز.</span></div>
+    <div class="btns" style="margin-top:14px"><button class="btn wide" data-act="close">إغلاق</button></div>`, 'فحص الصوت');
+  const ua=navigator.userAgent, inApp=/FBAN|FBAV|Instagram|Line\/|Snapchat|Claude/i.test(ua) || (IOS && !/Safari/i.test(ua) && !STANDALONE);
+  setD('dEnv', inApp?false:true, (IOS?'iPhone/iPad':/Android/i.test(ua)?'Android':'حاسوب')+' · '+(STANDALONE?'مثبّت على الشاشة الرئيسية':inApp?'متصفح داخل تطبيق آخر: افتح الرابط في Safari أو Chrome':'متصفح'));
+  setD('dSR', !!SR, SR ? 'مدعوم' : (IOS && STANDALONE ? 'غير مدعوم داخل التطبيق المثبّت على هذا الجهاز. افتح الرابط في Safari للتسميع' : 'غير مدعوم في هذا المتصفح. استخدم Chrome أو Safari'));
+  if (navigator.permissions && navigator.permissions.query){ navigator.permissions.query({name:'microphone'}).then(r=>setD('dMic', r.state==='denied'?false:r.state==='granted'?true:null, r.state==='granted'?'مسموح':r.state==='denied'?'مرفوض: فعّله من إعدادات الموقع في المتصفح':'سيُطلب عند البدء')).catch(()=>setD('dMic',null,'سيُطلب عند البدء')); }
+  else setD('dMic', null, 'سيُطلب عند البدء');
+  srcs.forEach((u,i)=>{ const t=new Audio(); let done=false; const fin=(ok,m)=>{ if(done) return; done=true; setD('dA'+i, ok, m); t.src=''; };
+    t.preload='auto'; t.addEventListener('canplaythrough',()=>fin(true,'يعمل')); t.addEventListener('loadedmetadata',()=>fin(true,'يعمل')); t.addEventListener('error',()=>fin(false,'لا يعمل من هذا الجهاز'));
+    setTimeout(()=>fin(null,'بطيء أو محجوب. جرّب زر التشغيل'),8000); t.src=u; try{ t.load(); }catch(e){} });
+}
+function diagPlay(i){
+  const u=audioSources(1,1)[i]; if(!u) return; try{ if(diagAudio) diagAudio.pause(); }catch(e){}
+  diagAudio=new Audio(u); setD('dA'+i,null,'جارٍ التشغيل…');
+  diagAudio.addEventListener('playing',()=>{ setD('dA'+i,true,'يعمل'); srcPref=i; });
+  diagAudio.play().catch(err=>setD('dA'+i,false,'فشل: '+(err&&err.name||'خطأ')));
+}
+function diagSpeak(){
+  const box=document.getElementById('dSay'); if(!box) return;
+  if (!SR){ box.innerHTML='<span class="fb">التعرّف على الكلام غير مدعوم هنا.</span>'; return; }
+  try { if (diagRec) diagRec.abort(); } catch(e){}
+  try {
+    diagRec=new SR(); diagRec.lang='ar-SA'; diagRec.continuous=false; diagRec.interimResults=true;
+    box.innerHTML='<span class="note">أستمع… تكلّم الآن</span>';
+    diagRec.onresult=e=>{ let t=''; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript+' '; box.innerHTML='<span style="font-family:var(--f-quran);font-size:1.2rem">'+t.replace(/[<>&]/g,'')+'</span>'; setD('dSR',true,'يعمل ويسمعك'); };
+    diagRec.onerror=e=>{ const m={'not-allowed':'رُفض إذن الميكروفون','service-not-allowed':'خدمة التعرّف غير متاحة (فعّل Siri والإملاء على iPhone)','no-speech':'لم يُسمع كلام','audio-capture':'لا يوجد ميكروفون يعمل','network':'يحتاج اتصالاً بالإنترنت'}[e.error]||e.error; box.innerHTML='<span class="fb">'+m+'</span>'; setD('dSR',false,m); };
+    diagRec.start();
+  } catch(err){ box.innerHTML='<span class="fb">تعذّر البدء: '+(err&&err.message||'')+'</span>'; }
+}
+
 /* ---------- backup ---------- */
 function exportData(){
   try {
@@ -837,9 +910,12 @@ document.addEventListener('click', e=>{
   }
   const act=t.dataset.act;
   if (act==='close'){ if (e.target===t || t.tagName==='BUTTON') closeSheet(); return; }
-  if (t.closest('.sheet') && !['set','clear','export','import','startSheet','rangeApply'].includes(act)) closeSheet();
+  if (t.closest('.sheet') && !['set','clear','export','import','startSheet','rangeApply','diag','diagSpeak','diagPlay'].includes(act)) closeSheet();
   switch(act){
     case 'settings': return settingsSheet();
+    case 'diag': return diagSheet();
+    case 'diagSpeak': return diagSpeak();
+    case 'diagPlay': return diagPlay(+t.dataset.i);
     case 'set': { const k=t.dataset.k, v=t.dataset.v; S.settings[k] = isNaN(+v) ? v : +v; save(); applyTheme(); settingsSheet(); if (view==='reader') refreshDock(); else render(); return; }
     case 'clear': if(!confirmClear){ confirmClear=true; settingsSheet(); return; } S={v:2,items:[],days:[],last:null,next:null,newLog:{},settings:Object.assign({},DEF,{theme:S.settings.theme})}; save(); closeSheet(); toast('حُذف التقدّم'); R=null; go('today'); return;
     case 'export': return exportData();
