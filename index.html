@@ -159,6 +159,9 @@ h2 button{border:0;background:none;color:var(--accent);font-size:.85rem;padding:
 .w.bad{color:var(--bad);background:var(--bad-soft)}
 .w.hint{color:var(--hint);background:var(--hint-soft)}
 .w.cur{outline:2px solid var(--accent);outline-offset:1px}
+.w.h.peek{color:color-mix(in srgb,var(--fg) 35%,transparent)}
+.fb{color:var(--hint);font-weight:500}
+.fb q{font-family:var(--f-quran);font-size:1.15em;quotes:none}
 .ayah.playing .w{background:var(--accent-soft)}
 .mark{border:0;background:none;padding:0 2px;color:var(--gold);font-family:var(--f-quran);font-size:1em;line-height:1;cursor:pointer}
 .dock{position:fixed;inset:auto 0 0;z-index:25;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(0,0,0,.05);
@@ -253,12 +256,14 @@ function lev(a,b){
   return p[n];
 }
 function sim(a,b){ const L=Math.max(a.length,b.length); return L ? 1-lev(a,b)/L : 1; }
+const TH = { easy:[0.6,0.66], normal:[0.67,0.74], strict:[0.8,0.84] };
 function match(heard, expected){
   if (!heard || !expected) return false;
   if (heard===expected) return true;
   const ha = stripA(heard), ea = stripA(expected);
   if (ha===ea) return true;
-  const th = Math.min(ea.length, ha.length) <= 3 ? 0.67 : 0.74;
+  const strict = TH[S.settings.strict] || TH.normal;
+  const th = Math.min(ea.length, ha.length) <= 3 ? strict[0] : strict[1];
   return sim(heard,expected) >= th || sim(ha,ea) >= th;
 }
 const tokCache = {};
@@ -271,7 +276,7 @@ const sName = s => Q[s-1][0];
 
 /* ---------- storage ---------- */
 const KEY = 'rafeeq-hifz-v1';
-const DEF = { reciter:RECITERS[0][0], size:1, repeat:3, goal:5, reads:5, theme:'system', dir:'fwd', onboarded:false };
+const DEF = { reciter:RECITERS[0][0], size:1, repeat:3, goal:5, reads:5, theme:'system', dir:'fwd', onboarded:false, strict:'normal' };
 let S = { v:2, items:[], days:[], last:null, next:null, newLog:{}, settings:Object.assign({},DEF) };
 let storageOk = true;
 try {
@@ -526,8 +531,16 @@ function openReader(s, a, b, opts){
 }
 function curMode(){ return R.flow==='learn' ? (R.step<2?'read':'test') : R.flow==='review' ? 'test' : R.mode; }
 function curLevel(){ return R.flow==='learn' ? (R.step===2?1:2) : R.flow==='review' ? 2 : R.level; }
-function expected(){ const out=[], T=tokens(R.s); for (let a=R.a;a<=R.b;a++) T[a-1].forEach((tk,i)=>{ if(!tk.m) out.push({a,i,n:tk.n}); }); return out; }
-function resetTest(){ R.st={}; R.ptr=0; R.tries={}; R.done=false; }
+const MUQ = new Set([2,3,7,10,11,12,13,14,15,19,20,26,27,28,29,30,31,32,36,38,40,41,42,43,44,45,46,50,68]);
+const isMuq = (s,a,i) => i===0 && MUQ.has(s) && (a===1 || (s===42 && a===2));
+let EXC=null;
+function expected(){
+  const key=R.s+':'+R.a+':'+R.b; if (EXC && EXC.key===key) return EXC.list;
+  const out=[], T=tokens(R.s);
+  for (let a=R.a;a<=R.b;a++) T[a-1].forEach((tk,i)=>{ if(!tk.m) out.push({a,i,n:tk.n,t:tk.t,muq:isMuq(R.s,a,i)?tk.n:''}); });
+  EXC={key,list:out}; return out;
+}
+function resetTest(){ R.st={}; R.ptr=0; R.tries={}; R.done=false; R.base=null; R.fb=null; R.heard=''; }
 function initGiven(){ if (curMode()!=='test' || curLevel()!==1) return; const T=tokens(R.s); for (let a=R.a;a<=R.b;a++){ const i=T[a-1].findIndex(t=>!t.m); const k=a+':'+i; if (i>=0 && !R.st[k]) R.st[k]='given'; } advancePtr(); }
 function renderReader(){
   const [name,tr,type] = Q[R.s-1]; const n=nAyat(R.s), T=tokens(R.s), mode=curMode(), level=curLevel();
@@ -573,8 +586,8 @@ function dockHTML(){
   const c = counts(); const errs=c.bad+c.hint;
   const head = `<div class="dock-row"><button class="round ${listening?'on':''}" data-act="mic" aria-label="${listening?'إيقاف الاستماع':'ابدأ التسميع بالصوت'}">${listening?I.stop:I.mic}</button>
     <div class="grow"><div class="score"><span class="pill strong">صحيح ${ar(c.ok)}</span><span class="pill weak">خطأ ${ar(c.bad)}</span><span class="pill due">تلميح ${ar(c.hint)}</span><span class="pill">من ${ar(c.tot)}</span></div>
-    <div class="heard" id="heard">${listening?'أستمع إليك… رتّل بهدوء':c.finished?'انتهى التسميع':'اضغط الميكروفون ورتّل، أو المس الكلمة المخفية لكشفها'}</div></div></div>`;
-  if (!c.finished) return dock(head + `<div class="btns"><button class="btn" data-act="reset">من جديد</button><button class="btn" data-act="reveal">كشف الكل</button><button class="btn primary wide" data-act="finish">أنهيت</button></div>`);
+    <div class="heard" id="heard">${heardLine(c)}</div></div></div>`;
+  if (!c.finished) return dock(head + `<div class="btns"><button class="btn" data-act="reset">من جديد</button><button class="btn" data-act="nextWord">الكلمة التالية</button><button class="btn" data-act="reveal">كشف الكل</button><button class="btn primary wide" data-act="finish">أنهيت</button></div>`);
   if (R.flow==='learn' && R.step===2) return dock(head + `<div class="btns"><button class="btn" data-act="reset">أعِد</button><button class="btn primary wide" data-act="step" data-to="3">التالي: سمّع غيباً</button></div>`);
   const sug = errs===0 ? 3 : errs<=Math.max(2,c.tot*0.03) ? 2 : errs<=c.tot*0.12 ? 1 : 0;
   const it = R.itemId ? S.items.find(x=>x.id===R.itemId) : findItem(R.s,R.a,R.b);
@@ -617,48 +630,113 @@ function celebrate(title, msg, offerLearn){
   overlay.innerHTML = `<div class="sheet-bg" data-act="close"><div class="sheet celebrate" role="dialog" aria-modal="true" aria-label="${title}"><div class="badge">${I.check}</div><h3>${title}</h3><p>${msg}</p><div class="btns" style="justify-content:center">${offerLearn?'<button class="btn primary" data-act="startLearn">ابدأ الحفظ</button>':''}<button class="btn ${offerLearn?'':'primary'}" data-act="close">حسناً</button></div></div></div>`;
 }
 
-/* ---------- voice recitation check ---------- */
+/* ---------- voice recitation check ----------
+   The recognizer keeps revising its guess, so every result event re-aligns
+   everything heard in this listening segment against the expected words,
+   starting from the state saved when the segment began. Interim words can
+   only confirm words, never mark mistakes. */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec=null, listening=false;
-function processHeard(words){
-  const ex = expected(); let j=0;
+let rec=null, listening=false, stallT=null;
+const LETTER = {'ا':['الف','ألف','اليف'],'ل':['لام'],'م':['ميم'],'ص':['صاد','صد'],'ر':['را','راء','ره'],'ك':['كاف'],'ه':['ها','هاء','هه'],'ي':['يا','ياء'],'ع':['عين','عيين'],'ط':['طا','طاء','طه'],'س':['سين'],'ح':['حا','حاء','حه'],'ق':['قاف'],'ن':['نون']};
+const OPENERS = new Set(['اعوذ','بالله','من','الشيطان','الرجيم','بسم','الله','الرحمن','الرحيم','صدق','العظيم'].map(norm));
+function heardLine(c){
+  if (R.fb) return `<span class="fb">الصحيح: <q>${R.fb}</q></span>`;
+  if (listening) return R.heard ? 'يسمع: '+R.heard : 'أستمع إليك… رتّل بهدوء';
+  if (c.finished) return 'انتهى التسميع';
+  return SR ? 'اضغط الميكروفون ورتّل، أو المس الكلمة المخفية لكشفها' : 'المس الكلمة المخفية لكشفها، أو اضغط رقم الآية لكشفها كاملة';
+}
+function commitBase(){ R.base = { st:Object.assign({},R.st), ptr:R.ptr, tries:Object.assign({},R.tries) }; }
+function restoreBase(){ if (!R.base) commitBase(); R.st=Object.assign({},R.base.st); R.ptr=R.base.ptr; R.tries=Object.assign({},R.base.tries); }
+function letterMatch(w, letter){ return (LETTER[letter]||[]).some(x=>match(w,norm(x))); }
+function align(words, tentFrom){
+  const ex = expected(); let j=0, fb=null;
+  const fresh = !Object.values(R.st).includes('ok') && !Object.values(R.st).includes('bad');
+  let started = !fresh;
+  const ok = e => { R.st[e.a+':'+e.i]='ok'; R.ptr++; advancePtr(); started=true; };
   while (j<words.length && R.ptr<ex.length){
-    const w=words[j], cur=ex[R.ptr];
-    if (match(w,cur.n)){ setWord(cur.a+':'+cur.i,'ok'); vib(6); R.ptr++; j++; advancePtr(); continue; }
-    if (j+1<words.length && match(w+words[j+1],cur.n)){ setWord(cur.a+':'+cur.i,'ok'); R.ptr++; j+=2; advancePtr(); continue; }
+    const tent = j>=tentFrom, w=words[j], cur=ex[R.ptr], nxt=ex[R.ptr+1];
+    if (cur.muq){
+      if (match(w,cur.n)){ ok(cur); j++; continue; }
+      const L=[...cur.muq]; let k=0;
+      while (k<L.length && j+k<words.length && letterMatch(words[j+k],L[k])) k++;
+      if (k===L.length){ ok(cur); j+=k; continue; }
+      if (k>0 && j+k>=words.length) break;
+    }
+    if (match(w,cur.n)){ ok(cur); j++; continue; }
+    if (j+1<words.length && match(w+words[j+1],cur.n)){ ok(cur); j+=2; continue; }
+    if (nxt && w.length>cur.n.length && match(w,cur.n+nxt.n)){ ok(cur); if (R.ptr<ex.length && ex[R.ptr]===nxt) ok(nxt); j++; continue; }
+    if (!started && OPENERS.has(w)){ j++; continue; }
+    if (tent) break;
     if ((R.ptr>0 && match(w,ex[R.ptr-1].n)) || (R.ptr>1 && match(w,ex[R.ptr-2].n))){ j++; continue; }
-    let skip=-1; for(let k=1;k<=3;k++){ const nx=ex[R.ptr+k]; if (nx && match(w,nx.n)){ skip=k; break; } }
-    if (skip>0){ for(let k=0;k<skip;k++){ const e=ex[R.ptr]; setWord(e.a+':'+e.i,'bad'); R.ptr++; } vib(40); continue; }
+    let skip=-1; for (let k=1;k<=3;k++){ const n2=ex[R.ptr+k]; if (n2 && match(w,n2.n)){ skip=k; break; } }
+    if (skip>0){ for (let k=0;k<skip;k++){ const e=ex[R.ptr]; R.st[e.a+':'+e.i]='bad'; fb=e.t; R.ptr++; } continue; }
     const key=cur.a+':'+cur.i; R.tries[key]=(R.tries[key]||0)+1;
-    if (R.tries[key]>=2){ setWord(key,'bad'); vib(40); R.ptr++; advancePtr(); }
+    if (R.tries[key]>=2){ R.st[key]='bad'; fb=cur.t; R.ptr++; advancePtr(); }
     j++;
   }
-  markCur();
-  if (R.ptr>=ex.length){ stopListening(); R.done=true; touchDay(); save(); }
+  return fb;
+}
+function syncWords(){
+  const ex=expected(); let changedOk=false, changedBad=false;
+  for (const e of ex){
+    const k=e.a+':'+e.i, el=app.querySelector(`[data-k="${k}"]`); if (!el) continue;
+    const st=R.st[k]; const want = st ? 'w '+(st==='given'?'':st) : (curMode()==='test' ? 'w h' : 'w');
+    const cur = el.className.replace(/\s*(cur|peek)\b/g,'').trim();
+    if (cur!==want.trim()){ if (st==='ok') changedOk=true; if (st==='bad') changedBad=true; el.className=want.trim(); }
+  }
+  if (changedBad) vib(40); else if (changedOk) vib(6);
+}
+function onWords(words, tentFrom, heardTxt){
+  const before=R.ptr; restoreBase(); const fb=align(words, tentFrom);
+  if (fb) R.fb=fb; else if (R.ptr>before) R.fb=null;
+  if (R.ptr!==before) R.lastProgress=Date.now();
+  R.heard = heardTxt.trim().split(/\s+/).slice(-6).join(' ');
+  syncWords(); markCur();
+  if (R.ptr>=expected().length){ commitBase(); stopListening(); R.done=true; touchDay(); save(); }
   refreshDock();
+}
+function resultWords(results){
+  // Some Android builds repeat earlier text at the start of each new result; drop repeated prefixes.
+  const parts=[]; let prev=[];
+  for (let i=0;i<results.length;i++){
+    let ws = results[i][0].transcript.split(/\s+/).map(norm).filter(Boolean);
+    if (prev.length && ws.length>=prev.length && prev.every((x,k)=>x===ws[k])) ws = ws.slice(prev.length);
+    parts.push({ws, fin:results[i].isFinal, txt:results[i][0].transcript});
+    prev = results[i][0].transcript.split(/\s+/).map(norm).filter(Boolean);
+  }
+  return parts;
 }
 function startListening(){
   if (!SR){ toast('التسميع الصوتي غير مدعوم في هذا المتصفح. جرّب Chrome أو Safari، أو المس الكلمات لكشفها.'); return; }
   stopAudio();
   try {
     rec = new SR(); rec.lang='ar-SA'; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+    commitBase(); R.fb=null; R.heard=''; R.lastProgress=Date.now();
     rec.onresult = e => {
-      let interim='';
-      for (let i=e.resultIndex;i<e.results.length;i++){
-        const txt=e.results[i][0].transcript;
-        if (e.results[i].isFinal) processHeard(txt.split(/\s+/).map(norm).filter(Boolean)); else interim+=txt;
-      }
-      const hd=document.getElementById('heard'); if (hd && interim) hd.textContent='يسمع: '+interim;
+      const parts = resultWords(e.results); const words=[]; let tentFrom=Infinity, txt='';
+      parts.forEach(p=>{ if (!p.fin && tentFrom===Infinity) tentFrom=words.length; words.push(...p.ws); txt+=' '+p.txt; });
+      onWords(words, tentFrom, txt);
     };
     rec.onerror = e => {
-      if (e.error==='not-allowed' || e.error==='service-not-allowed'){ listening=false; releaseWake(); toast('لم يُسمح بالميكروفون. فعّله من إعدادات المتصفح لهذا الموقع، أو افتح التطبيق من رابطه مباشرة.'); refreshDock(); }
-      else if (e.error==='network'){ listening=false; releaseWake(); toast('التعرّف على الصوت يحتاج اتصالاً بالإنترنت.'); refreshDock(); }
+      if (e.error==='not-allowed' || e.error==='service-not-allowed'){ listening=false; clearInterval(stallT); releaseWake(); toast('لم يُسمح بالميكروفون. فعّله من إعدادات المتصفح لهذا الموقع.'); refreshDock(); }
+      else if (e.error==='network'){ listening=false; clearInterval(stallT); releaseWake(); toast('التعرّف على الصوت يحتاج اتصالاً بالإنترنت.'); refreshDock(); }
+      else if (e.error==='language-not-supported'){ listening=false; clearInterval(stallT); toast('هذا الجهاز لا يدعم التعرّف على العربية.'); refreshDock(); }
     };
-    rec.onend = () => { if (listening){ try{ rec.start(); }catch(err){ listening=false; refreshDock(); } } };
+    rec.onend = () => { if (!R) return; commitBase(); if (listening){ try{ rec.start(); }catch(err){ listening=false; refreshDock(); } } };
     rec.start(); listening=true; holdWake(); refreshDock(); markCur();
+    clearInterval(stallT); stallT=setInterval(stallCheck, 1000);
   } catch(err){ listening=false; toast('تعذّر تشغيل التعرّف على الصوت.'); refreshDock(); }
 }
-function stopListening(){ listening=false; if (rec){ try{ rec.onend=null; rec.stop(); }catch(e){} rec=null; } releaseWake(); }
+function stallCheck(){
+  if (!listening || !R) { clearInterval(stallT); return; }
+  if (Date.now()-(R.lastProgress||0) < 7000) return;
+  const e=expected()[R.ptr]; if (!e) return;
+  const el=app.querySelector(`[data-k="${e.a}:${e.i}"]`);
+  if (el && el.classList.contains('h')){ el.classList.add('peek'); setTimeout(()=>el.classList.remove('peek'), 2200); }
+  R.lastProgress=Date.now();
+}
+function stopListening(){ listening=false; clearInterval(stallT); if (rec){ try{ rec.onend=null; rec.onresult=null; rec.stop(); }catch(e){} rec=null; } if (R){ R.heard=''; } releaseWake(); }
+function userHint(keys){ keys.forEach(k=>{ if (!R.st[k]) setWord(k,'hint'); }); advancePtr(); R.fb=null; R.lastProgress=Date.now(); commitBase(); markCur(); refreshDock(); }
 
 /* ---------- audio ---------- */
 const audio = new Audio(); audio.preload='auto';
@@ -671,6 +749,7 @@ function playCur(){
   const a=queue[qi]; audio.src = audioUrl(R.s, a); highlight(a);
   try { if ('mediaSession' in navigator){ navigator.mediaSession.metadata = new MediaMetadata({title:'سورة '+sName(R.s)+' · الآية '+a, artist:(RECITERS.find(r=>r[0]===S.settings.reciter)||RECITERS[0])[1], album:'رفيق الحفظ'}); } } catch(e){}
   const p = audio.play(); if (p && p.catch) p.catch(()=>failAudio());
+  const nx = queue[qi+1]; if (nx){ try { const pre=new Audio(); pre.preload='auto'; pre.src=audioUrl(R.s,nx); } catch(e){} }
 }
 function failAudio(){ if(!playing) return; stopAudio(); toast('تعذّر تشغيل الصوت. تحقّق من الاتصال، أو افتح التطبيق من رابطه مباشرة.'); }
 audio.addEventListener('ended', ()=>{ rep++; if (!loopOne && rep>=S.settings.repeat){ rep=0; qi++; } playCur(); });
@@ -695,6 +774,7 @@ function settingsSheet(){
     <div class="field"><label for="fs">حجم خط المصحف</label><input id="fs" type="range" min="0.8" max="1.7" step="0.1" value="${st.size}"><div class="preview">ٱلۡحَمۡدُ لِلَّهِ رَبِّ ٱلۡعَٰلَمِينَ</div></div>
     <div class="field"><span class="lbl">الحفظ الجديد يومياً</span><div class="chips" style="padding:0">${[3,5,7,10,15,20].map(n=>`<button class="chip" data-act="set" data-k="goal" data-v="${n}" aria-pressed="${st.goal===n}">${ar(n)} آيات</button>`).join('')}</div></div>
     <div class="field"><span class="lbl">مرات التكرار عند الاستماع وعدد الترديد</span><div class="chips" style="padding:0">${[1,3,5,7,10].map(n=>`<button class="chip" data-act="set" data-k="repeat" data-v="${n}" aria-pressed="${st.repeat===n}">${ar(n)}×</button>`).join('')}</div></div>
+    <div class="field"><span class="lbl">دقّة التصحيح الصوتي</span>${seg('strict',[['easy','متساهل'],['normal','متوسط'],['strict','دقيق']])}<span class="note">«متساهل» أنسب إذا كان التعرّف يخطئ في كلمات صحيحة، و«دقيق» يلتقط أخطاء النطق الواضحة أكثر.</span></div>
     <div class="field"><span class="lbl">نقطة الحفظ الحالية</span><button class="btn" data-act="startSheet" style="align-self:flex-start">${S.next?'سورة '+sName(S.next.s)+' · الآية '+ar(S.next.a)+' · تغيير':'حدّد نقطة البداية'}</button></div>
     <div class="field"><span class="lbl">البيانات</span><div class="btns"><button class="btn" data-act="export">تصدير</button><button class="btn" data-act="import">استيراد</button><button class="btn danger" data-act="clear">${confirmClear?'اضغط مجدداً لتأكيد الحذف':'حذف كل التقدّم'}</button></div><span class="note">يُحفظ تقدّمك على هذا الجهاز فقط، ولا يُرسل إلى أي جهة.</span></div>
     <div class="credit">هذا التطبيق وقفٌ مجاني لوجه الله، بلا إعلانات ولا اشتراكات.<br>نص المصحف بالرسم العثماني من <a href="https://quranenc.com" target="_blank" rel="noopener">موسوعة القرآن الكريم</a> عبر مشروع quran-json (رخصة CC BY-SA 4.0). التلاوات من <a href="https://everyayah.com" target="_blank" rel="noopener">EveryAyah</a>.<br>التصحيح الصوتي تقريبي يساعد على المراجعة، ولا يغني عن التلقّي من معلّم متقن.</div>
@@ -751,13 +831,13 @@ document.addEventListener('click', e=>{
     if (!R || view!=='reader') return;
     const w = e.target.closest('.w');
     if (!w) return;
-    if (curMode()==='test'){ if (w.classList.contains('h')){ setWord(w.dataset.k,'hint'); advancePtr(); markCur(); refreshDock(); } }
+    if (curMode()==='test'){ if (w.classList.contains('h')) userHint([w.dataset.k]); }
     else ayahSheet(+w.dataset.a);
     return;
   }
   const act=t.dataset.act;
   if (act==='close'){ if (e.target===t || t.tagName==='BUTTON') closeSheet(); return; }
-  if (t.closest('.sheet') && !['set','clear','export','import','startSheet'].includes(act)) closeSheet();
+  if (t.closest('.sheet') && !['set','clear','export','import','startSheet','rangeApply'].includes(act)) closeSheet();
   switch(act){
     case 'settings': return settingsSheet();
     case 'set': { const k=t.dataset.k, v=t.dataset.v; S.settings[k] = isNaN(+v) ? v : +v; save(); applyTheme(); settingsSheet(); if (view==='reader') refreshDock(); else render(); return; }
@@ -785,8 +865,9 @@ document.addEventListener('click', e=>{
     case 'read1': R.reads++; vib(8); refreshDock(); return;
     case 'rangeSheet': return rangeSheet();
     case 'rangeAll': return openReader(R.s,1,nAyat(R.s),{flow:'free',mode:R.mode});
-    case 'rangeApply': { const a=+document.getElementById('ra').value, b=+document.getElementById('rb').value; return openReader(R.s,Math.min(a,b),Math.max(a,b),{flow:'free',mode:R.mode}); }
-    case 'ayah': { const a=+t.dataset.a; if (curMode()==='test'){ tokens(R.s)[a-1].forEach((tk,i)=>{ const k=a+':'+i; if(!tk.m && !R.st[k]) setWord(k,'hint'); }); advancePtr(); markCur(); refreshDock(); } else ayahSheet(a); return; }
+    case 'rangeApply': { const a=+document.getElementById('ra').value, b=+document.getElementById('rb').value; closeSheet(); return openReader(R.s,Math.min(a,b),Math.max(a,b),{flow:'free',mode:R.mode}); }
+    case 'ayah': { const a=+t.dataset.a; if (curMode()==='test'){ userHint(tokens(R.s)[a-1].map((tk,i)=>tk.m?null:a+':'+i).filter(Boolean)); } else ayahSheet(a); return; }
+    case 'nextWord': { const e=expected()[R.ptr]; if (e) userHint([e.a+':'+e.i]); return; }
     case 'aPlay': return playFrom(+t.dataset.a, true, false);
     case 'aLoop': return playFrom(+t.dataset.a, true, true);
     case 'aPlayFrom': return playFrom(+t.dataset.a, false, false);
